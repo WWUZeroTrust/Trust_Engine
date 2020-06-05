@@ -7,12 +7,11 @@ import requests
 import time
 import json, re, sys
 import threading
+#set various scores for different fields
 type = 15
 user = 15
 host = 15
 pid = 15
-total_MAX = 25
-total_MIN = 0
 lock = 0
 
 username = ""
@@ -30,41 +29,38 @@ tasks = [
 def get_username(username):
     #When function is called. Send signal that new score needs to be calculated.
     global type, user, host, pid, lock
-    #if lock == 0:
+
     print("passed user: %s" %username)
     count = 0
-    #for user_count in username:
-    #    count+=1
-    #print("count: ",count)
-    #if count <= 1:
+ 
+    #these are the fields of preset values from osquery
+    #they are hardcoded into the trust scoring 
     data_liu_type = ['user', 'boot_time', 'blah']
     data_liu_user = ['testosquery', 'reboot', 'runlevel']
     data_liu_host = [':1', '5.3.0-46-generic']
     data_liu_pid = ['0', '53', '2642']
+    
+    #this calls the trust engine for each field in the logged_in_users query
     trustengine(data_liu_type, 1, username)
     trustengine(data_liu_user, 2, username)
     trustengine(data_liu_host, 3, username)
     trustengine(data_liu_pid, 4, username)
-    # for user_count in username:
-    #     print("user_count: ", username)
-    #     count+=1
-    #     if count == 1:
+
+    #this adds up the score from the trust engine function and 
+    #sends the score to the Swissknife API
     pass_score(type + user + host + pid)
             #pass_score(10)
 
-
+    #resets the scores to their base value
     type = 15
     user = 15
     host = 15
     pid = 15
 
 
-#Query Command
-# curl -i -H "Content-Type: application/json" -X PUT -d "{\"JWT\":\"VALUE\"}" http://localhost:5000/1
-
-# curl -i http://localhost:5000/1
+#This grabs the scores calulated and adds them up to get a total score for a field
 def field_score_add(category, cur_val):
-    global type, user, host, pid, total_MAX, total_MIN
+    global type, user, host, pid
     if category == "type":
         type = type + cur_val
     if category == "user":
@@ -78,43 +74,48 @@ def field_score_add(category, cur_val):
     print("host: ", host)
     print("pid: ", pid)
 
-
+#this is the main function
 def trustengine(data_array, number, user):
-
+    #this connects to the elasticsearch database
     client = Elasticsearch(['http://<username>:<password>@localhost:9200'])
+    
     t = date.today()
     t = str(t).replace("-", ".")
-    #print("TIME: ",t)
+    #sets the index name to "osquery-result-yyyy.mm.dd" with the time
+    #this ensures the index is alway set to the current day
     INDEX_NAME = ("osquery-result-" + t)
-    #print("INDEX_NAME:", INDEX_NAME)
 
-
-    #def elasticToJson(json_data):
-    #Prints results from x:y
-
-    #Put everything in a fucntino. Return json_data.
+    #this queries the elasticsearch database according to these parameters
     s = Search(using=client, index=INDEX_NAME) \
+        #passes the user that it gets from the Swissknife API to the elasticsearch database for the query
         .filter("term", hostIdentifier=user) \
+        #looks for the logged_in_user query
         .query("match", name="pack/testpack/logged_in_users") \
+        #only grabs the data in the snapshot
         .source(includes=["snapshot"])
 
-
+    #this sets how much data can be stored in the search results array
     s = s[0:100]
-
+    
+    #this executes the query
     response = s.execute()
-
+    
+    #goes through all of the data in the query and formats the data into a json acceptable format with replace
+    #then loads that data into the variable json_data which is all of the data from the query that contains fields
     for hit in response:
        for hostIdentifier in hit:
            data = hit[hostIdentifier]
            json_acceptable_string = str(data).replace("'", "\"").replace("\"{", "{").replace("}\"", "}")
            json_data = json.loads(json_acceptable_string)
 
-    MAX = 25
     SCORE = 0
-    MIN = 0
-
+    
+    #creates an array of the fields from the query, when the number is passed to the trust engine function
+    #the index of this array is the number that gets passed when the trust engine function is called above
     json_array_field = ['time', 'type', 'user','host', 'pid']
+    #counts how many times a match is not found in the query
     miss_counter = 0
+    #sets the length of the predefined array passed into the trust engine function
     max_length = len(data_array)
     for i in json_data:
         miss_counter = 0
